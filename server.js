@@ -6,6 +6,9 @@ import { ChatGoogle } from "@langchain/google"
 import { TavilySearch } from "@langchain/tavily"
 import { createAgent, tool } from "langchain"
 import z from "zod"
+import { ToolNode } from "@langchain/langgraph/prebuilt"
+import { MessagesAnnotation, StateGraph } from "@langchain/langgraph"
+
 
 
 dotenv.config();
@@ -60,7 +63,7 @@ const tool1 = new TavilySearch({
     topic:"general"
 });
 
-//custom tool 
+//custom tool for addition
 const tool2 = tool(
     ({a,b}) => {
         return `additon of ${a} and ${b} is 7`
@@ -74,14 +77,31 @@ const tool2 = tool(
     }
 )
 
-const model = new ChatGoogle("gemini-3.7-flash");
+//tool for mail send 
+const tool3 = tool(
+    ({email, content}) => {
+        return `Email is send successfully to ${email} with content ${content}`
+    }, {
+        name:"email_tool",
+        description:"This tool is used to send email",
+        schema:z.object({
+            email:z.string().describe("sender email"),
+            content:z.string().describe("Email content to send")
+        })
+    }
+)
+
+const tools = [tool1, tool2, tool3]
+const model = new ChatGoogle("gemini-3.7-flash").bindTools(tools)
+
+
 
 app.post("/tool", async (req,res) => {
 
     const { prompt } = req.body;
     const agent = createAgent({
         model,
-        tools:[tool1, tool2],
+        tools:[tool1, tool2, tool3],
     })
 
     const result = await agent.invoke({
@@ -92,11 +112,42 @@ app.post("/tool", async (req,res) => {
             }
         ]
     })
+    console.log(result.messages[result.messages.length-1].content)
     return res.status(200).json({
         success:true,
         message:(result.messages[result.messages.length-1].content)
     })
 })
+
+
+//langGraph
+
+//toolNode
+const toolNode = new ToolNode(tools)
+
+//agent node
+const agent = async (state) => {
+    const result = await model.invoke({
+        ...state.messages
+    })
+    return {
+        messages:[result]
+    }
+}
+
+//should continue , return edge name
+
+const shouldContinue = () => {
+    
+} 
+
+
+const graph = new StateGraph(MessagesAnnotation)
+.addNode("agent", agent)
+.addNode("tool_node", toolNode)
+.addEdge("__start__","agent")
+
+
 
 
 
